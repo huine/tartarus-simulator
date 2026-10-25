@@ -216,6 +216,11 @@
   const RUN_OVER = /Btn_S16GamePlay_CheckOut_AbandonChallenge/;
   const ENTRY = /Page@ OpenView S16GamePlayEntry\b/;
   const RUN_NEW = /Btn_S16GamePlay_Start|S16BoardTaskPop Run|S16BoardRelicPop Run|Page@ OpenView S16Board(TaskPop|RelicPop)\b/;
+  // A button clicked in the prison (a door card is Btn_S16Board_RouteCell,
+  // the decision cards Btn_S16Board_ActionCell, the fight's start
+  // Btn_S16GamePlay_CheckOut_StartChallenge), not Speed-up: the box over the
+  // game goes at once.
+  const CLICK = /normal-click Btn_S16(?!Board_Top_Speed)/;
   let riotSeen = false;
   const riotWatch = (s) => {
     if (RUN_OVER.test(s.line) || (riotSeen && ENTRY.test(s.line))) {
@@ -226,6 +231,7 @@
       riotSeen = true;
       D.riot(true);
     } else if (PRISON.test(s.line)) D.riot(false);
+    if (CLICK.test(s.line) && typeof D.clicked === 'function') D.clicked();
   };
   C.on('seen', riotWatch);
 
