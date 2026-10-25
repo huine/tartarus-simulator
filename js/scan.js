@@ -2101,7 +2101,10 @@
     const chromatic = readChromatic(img, loc);
     const statusView = !doors && readStatusView(img, loc);
     const objective = objectiveBox(img, loc, tools);
-    const chain = readChainScreen(img, loc, cells, warden);
+    // Cards to go to a cell aren't a meal pick, even with a red-framed
+    // inmate's glow on them (the user's Prison Walk: "Go to Cell 7" and 9,
+    // both red, read as a meal pick at 0.22, and the advice was to cancel).
+    const chain = doors ? null : readChainScreen(img, loc, cells, warden);
     // A meal pick darkens the board, most at its red sides, where a padlock
     // can drop below the usual lightness (report 314: three locked cells
     // read as open and empty): a cell read empty there is checked again for

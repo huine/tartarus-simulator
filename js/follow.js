@@ -28,6 +28,25 @@
   // screen at the end writes the day line too, with max=0, and is left out.
   const DEFAULT_RULES = [
     '# kind | pattern | settle ms  (one trigger a line; # starts a note)',
+    "# Since the game's update of 2026-10-20 its log has only the screens",
+    '# opening and closing (Page@ OpenView / CloseView): no moves, no day line.',
+    '# The objective, the pick of 3 instruments, the day banner, the Treasure,',
+    '# and the board once the banner, the Treasure or an event closes:',
+    'objective | Page@ OpenView S16BoardTaskPop\\b | 1500',
+    'instruments | Page@ OpenView S16BoardRelicPop\\b | 1500',
+    'skip | Page@ OpenView S16BoardNewDayPop\\b | 0',
+    'board | Page@ CloseView \\d+_S16BoardNewDayPopCtrl | 1500',
+    'treasure | Page@ OpenView S16BoardColoredPop\\b | 1500',
+    'board | Page@ CloseView \\d+_S16BoardColoredPopCtrl | 600',
+    'board | Page@ CloseView \\d+_S16BoardEventPopCtrl | 1500',
+    '# No picture: the board opening starts the timed pictures (if on), and',
+    "# the Riot's screen after the last day, the prison's entry or leaving",
+    '# the map ends the run and stops them:',
+    'run-start | Page@ OpenView S16BoardMain\\b | 0',
+    'run-end | Page@ OpenView S16GamePlayCheckOut\\b | 0',
+    'run-end | Page@ OpenView S16GamePlayEntry\\b | 0',
+    'run-end | LevelMgr@ _DoPlayerLeaveLevel | 0',
+    '# Before that update, with Enable Log on:',
     '# Tartarus Prison is S16 in the log. A run\'s objective, when it shows one:',
     'objective | S16BoardTaskPop Run | 1500',
     '# The pick of 3 instruments, and after a re-roll:',
@@ -61,6 +80,34 @@
   // Defaults from earlier versions. Saved settings that are just one of
   // these give way to the defaults above.
   const RETIRED = [
+    [
+      '# kind | pattern | settle ms  (one trigger a line; # starts a note)',
+      '# Tartarus Prison is S16 in the log. A run\'s objective, when it shows one:',
+      'objective | S16BoardTaskPop Run | 1500',
+      '# The pick of 3 instruments, and after a re-roll:',
+      'instruments | S16BoardRelicPop Run | 1500',
+      'instruments | Btn_S16Board_RelicPop_Reroll | 2000',
+      '# Each day, once its banner closes, and after a move, once its cards come up:',
+      'board | \\[S16LastDay\\] check cur=\\d+ max=[1-9] | 1500',
+      'board | UI_S16_Card_Up | 1500',
+      '# After an action in the cell, and after each bite of a consume chain',
+      '# (the next meal to pick, or the board after the chain), once it plays',
+      "# out; unless the day ends, as a new day's banner drops a picture still",
+      '# waiting (skip):',
+      'board | Btn_S16Board_ActionCell | 2000',
+      'board | UI_S16_Click_Eat | 2500',
+      'skip | S16BoardNewDayPop Run | 0',
+      "# The Warden's Treasure, which a Chromatic prisoner opens, and the board",
+      '# once it closes, with the gift taken (a consume can open two in a row):',
+      'treasure | S16BoardColoredPop Run | 1500',
+      'board | S16BoardColoredPop Destory | 600',
+      "# The game's Speed-up button: no picture, it flips 'Speed-up is on' here:",
+      'speed | Btn_S16Board_Top_Speed | 0',
+      '# A Cancel (a consume chain stopped), once the board settles:',
+      'board | UI_S16_Click_Cancel | 1500',
+      "# After an event's Confirm (the Sewer Ratway's cell pick, or the board after it):",
+      'board | Btn_S16Board_EventPop_Confirm | 1500',
+    ].join('\n'),
     [
       '# kind | pattern | settle ms  (one trigger a line; # starts a note)',
       '# Tartarus Prison is S16 in the log. A run\'s objective, when it shows one:',
@@ -210,8 +257,8 @@
   // player's agreement) is written only by the agreement at the bottom.
   // Triggers and the watch pattern are saved only when changed from the
   // defaults, so new defaults reach everyone who didn't change them.
-  const OWN = ['rules', 'watch', 'read', 'speed'];
-  const DEFAULTS = { rules: DEFAULT_RULES, watch: DEFAULT_WATCH, read: true, speed: false };
+  const OWN = ['rules', 'watch', 'read', 'speed', 'timer', 'every'];
+  const DEFAULTS = { rules: DEFAULT_RULES, watch: DEFAULT_WATCH, read: true, speed: false, timer: false, every: 1 };
   const saved = load();
   for (const k of ['rules', 'watch']) if (RETIRED.includes(saved[k])) delete saved[k];
   const prefs = Object.assign({}, DEFAULTS, saved);
@@ -219,7 +266,7 @@
     try {
       const all = load();
       for (const k of OWN) {
-        if (k !== 'read' && k !== 'speed' && prefs[k] === DEFAULTS[k]) delete all[k];
+        if ((k === 'rules' || k === 'watch') && prefs[k] === DEFAULTS[k]) delete all[k];
         else all[k] = prefs[k];
       }
       localStorage.setItem(KEY, JSON.stringify(all));
@@ -307,7 +354,7 @@
   // The Treasure's popup closing with no gift confirmed just before: the
   // player pressed View Prison Status, and the Treasure still waits.
   function treasureViewed(hits) {
-    const shut = stampMs((hits.find((h) => /ColoredPop Destory/.test(h.text || '')) || {}).at);
+    const shut = stampMs((hits.find((h) => /ColoredPop Destory|_S16BoardColoredPopCtrl\b/.test(h.text || '')) || {}).at);
     return !!shut && !(lastGift && shut >= lastGift && shut - lastGift < 3000);
   }
   function treasureAfter(hits) {
@@ -427,6 +474,84 @@
     return toBlob(canvas, 'image/png');
   }
 
+  // A picture shrunk to 96×54 in grey, to tell whether the game's screen
+  // changed (timed pictures). Each of its pixels is the average of 4×4 of a
+  // 384×216 copy: shrunk at once, the browser samples a few points, and a
+  // sparkle of an animation moved them (the user's consume: pictures of one
+  // screen 14 to 32 pixels apart, 0 to 16 averaged). Nothing of it is kept
+  // but the last minute's.
+  const SIG_W = 96;
+  const SIG_H = 54;
+  const SIG_N = 4;
+  let sigCanvas = null;
+  function signature(frame) {
+    try {
+      const w = SIG_W * SIG_N;
+      const h = SIG_H * SIG_N;
+      if (!sigCanvas) sigCanvas = Object.assign(document.createElement('canvas'), { width: w, height: h });
+      const g = sigCanvas.getContext('2d', { willReadFrequently: true });
+      g.imageSmoothingQuality = 'high';
+      g.drawImage(frame, 0, 0, w, h);
+      const d = g.getImageData(0, 0, w, h).data;
+      const sum = new Uint32Array(SIG_W * SIG_H);
+      for (let y = 0; y < h; y++) {
+        const row = ((y / SIG_N) | 0) * SIG_W;
+        for (let x = 0; x < w; x++) {
+          const k = (y * w + x) * 4;
+          sum[row + ((x / SIG_N) | 0)] += d[k] * 3 + d[k + 1] * 6 + d[k + 2];
+        }
+      }
+      const out = new Uint8Array(SIG_W * SIG_H);
+      for (let i = 0; i < out.length; i++) out[i] = sum[i] / (10 * SIG_N * SIG_N);
+      return out;
+    } catch (e) {
+      return null;
+    }
+  }
+  // The same screen: under 40 of its 5,184 pixels changed clearly. In the
+  // user's run, pictures of one screen (an animation, the mouse pointer)
+  // were 0 to 21 apart, and every move, day or popup 95 or more.
+  function sameScreen(a, b, most = 40) {
+    if (!a || !b) return false;
+    let changed = 0;
+    for (let i = 0; i < a.length; i++) if (Math.abs(a[i] - b[i]) > 24 && ++changed >= most) return false;
+    return true;
+  }
+  // The screens in the pictures of the last minute, timed or not: an
+  // animation that sways on the board (a consume's, over the prisoners)
+  // shows a few poses over and over, and each one held for a look passed
+  // for a new screen, so a picture went every two seconds (the user). A
+  // screen like any of these isn't new.
+  const recent = []; // newest last: { sig, at }
+  const RECENT_MS = 60000;
+  function remember(sig) {
+    if (!sig) return;
+    const now = Date.now();
+    recent.push({ sig, at: now });
+    while (recent.length > 24 || (recent.length && now - recent[0].at > RECENT_MS)) recent.shift();
+  }
+  const seenRecently = (sig) => recent.some((r) => Date.now() - r.at <= RECENT_MS && sameScreen(sig, r.sig));
+  // A Replace changes one prisoner: its board was 22 pixels from the one
+  // advised, which was a timed picture, so no log picture cleared the list
+  // and the timer missed it for a minute (the user). Once the analyzer
+  // advises a Replace, a screen even a little unlike that board is new,
+  // until the next picture. The same Replace advised again keeps the
+  // screens before: something swaying on the board (or the pointer) made a
+  // picture every two seconds, each advised the same (the user).
+  let replaced = null; // { move, sigs, at, armed }: the boards a Replace was advised on
+  const REPLACE_MS = 60000;
+  const movedFrom = (sig) => !!replaced && replaced.armed && Date.now() - replaced.at <= REPLACE_MS && replaced.sigs.every((r) => !sameScreen(sig, r, 10));
+  function adviseMove(c, move) {
+    if (!/^Replace\b/.test(move) || !c.sig) {
+      replaced = null;
+      return;
+    }
+    if (!replaced || replaced.move !== move) replaced = { move, sigs: [] };
+    replaced.sigs = replaced.sigs.concat([c.sig]).slice(-12);
+    replaced.at = Date.now();
+    replaced.armed = true;
+  }
+
   // #region each-picture
   // Each picture is listed here as a small preview, kept in memory only:
   // closing the tab drops it. Then it's handed to the board analyzer open
@@ -435,6 +560,15 @@
   // only this site's own pages in this browser. Nothing is uploaded.
   async function onFrame(f) {
     const c = { id: nextId++, time: f.time, kind: f.kind, hits: f.hits || [], frame: !!f.frame, why: f.why || '', thumb: '', full: '', sent: false, read: null, state: '', asked: false, note: '' };
+    // A picture from the log starts a new step (a day, a move): the screens
+    // before it don't count. A replaced prisoner's board was 22 pixels from
+    // the day before's, so the timer missed it (the user).
+    if (f.kind !== 'timer' && f.kind !== 'manual') recent.length = 0;
+    if (f.frame) {
+      c.sig = f.sig || signature(f.frame);
+      remember(c.sig);
+      if (replaced) replaced.armed = false;
+    }
     lastPicture = { at: Date.now(), kind: c.kind, ok: c.frame, why: c.why };
     tell();
     captures.unshift(c);
@@ -493,6 +627,7 @@
     if (m.read) c.read = m.read;
     if (m.state) c.state = m.state;
     if (m.asked) c.asked = true;
+    if (m.move) adviseMove(c, m.move);
     renderCaptures();
   }
 
@@ -520,7 +655,7 @@
       if (giftOpen) gifts.taken += 1;
       giftOpen = false;
     }
-    if (/S16BoardColoredPop Run\b/.test(s.line)) giftOpen = true;
+    if (/S16BoardColoredPop Run\b|OpenView S16BoardColoredPop\b/.test(s.line)) giftOpen = true;
     const vault = /Anim_Archive_LightUp, Id = (\S+)/.exec(s.line);
     if (vault || /UI_S16_Premium_Quality_Fly/.test(s.line)) {
       const t = stampMs(s.at);
@@ -593,6 +728,97 @@
     setSpeed(!prefs.speed);
     $('az-auto-note').textContent = `Speed-up was pressed in the game: pictures now come ${prefs.speed ? 'sooner' : 'at the usual pace'}. If that's wrong, flip “Speed-up is on in the game”.`;
   });
+  // #region timed-pictures
+  // Timed pictures: since the game's update of 2026-10-20 its log shows no
+  // moves, so a consume, a Replace or a pick in a cell takes no picture. With
+  // this on, the game window is looked at every 0.25 to 2 seconds during a
+  // run, and a picture goes to the analyzer when the screen is unlike any
+  // in the last minute's pictures (timed or from the log) and held still for one
+  // look, so an animation isn't read halfway, and none while a trigger's
+  // picture waits for the screen to settle. A run starts with the log's
+  // prison screens (the board, a day's banner, the objective or the
+  // instruments) and ends at the Riot's screen, the prison's entry or
+  // leaving the map (the "run-start" and "run-end" triggers).
+  let inRun = false;
+  let pending = null; // a changed screen, waiting to hold still
+  let looking = false;
+  let lookTimer = 0;
+  let timedCount = 0;
+  const RUN_KINDS = ['run-start', 'objective', 'instruments', 'board', 'treasure', 'skip'];
+  const renderTimer = () => {
+    $('az-auto-every-out').textContent = `${prefs.every} s`;
+    $('az-auto-timer-state').textContent = !prefs.timer ? 'Off: pictures come only from the log and Take a picture now.'
+      : C.state.window !== 'on' ? 'Waiting for the game window to be shared.'
+        : !inRun ? 'Waiting for a run: it starts once the prison’s board shows.'
+          : `On for this run: ${timedCount} ${timedCount === 1 ? 'picture' : 'pictures'} taken by the timer.`;
+  };
+  async function look() {
+    lookTimer = 0;
+    if (!prefs.timer || !inRun || looking || C.state.window !== 'on') return;
+    looking = true;
+    try {
+      // A trigger's picture is on its way (the log saw the screen change):
+      // it's that one, not a timed one, once the screen settles.
+      if (C.waiting()) {
+        pending = null;
+        return;
+      }
+      const frame = await C.grab();
+      if (!frame) return;
+      const sig = signature(frame);
+      const known = !sig || (!movedFrom(sig) && seenRecently(sig));
+      if (known || !sameScreen(sig, pending)) {
+        // Unchanged (or a screen of the last minute), or still changing:
+        // nothing to read yet.
+        pending = known ? null : sig;
+        frame.close();
+        return;
+      }
+      pending = null;
+      timedCount += 1;
+      soon(renderTimer);
+      C.sendFrame('timer', frame, { sig });
+    } catch (e) {
+      console.error(e);
+    } finally {
+      looking = false;
+      lookSoon();
+    }
+  }
+  function lookSoon() {
+    clearTimeout(lookTimer);
+    lookTimer = prefs.timer && inRun ? setTimeout(look, prefs.every * 1000) : 0;
+  }
+  const setRun = (on) => {
+    if (on === inRun) return;
+    inRun = on;
+    pending = null;
+    if (on) timedCount = 0;
+    lookSoon();
+    renderTimer();
+  };
+  C.on('hit', (h) => {
+    if (h.kind === 'run-end') setRun(false);
+    else if (RUN_KINDS.includes(h.kind)) setRun(true);
+  });
+  C.on('status', () => soon(renderTimer));
+  $('az-auto-timer').checked = prefs.timer;
+  $('az-auto-every').value = String(prefs.every);
+  $('az-auto-timer').addEventListener('change', (e) => {
+    prefs.timer = e.target.checked;
+    save();
+    lookSoon();
+    renderTimer();
+  });
+  $('az-auto-every').addEventListener('input', (e) => {
+    prefs.every = Math.min(2, Math.max(0.25, Number(e.target.value) || 1));
+    save();
+    lookSoon();
+    renderTimer();
+  });
+  renderTimer();
+  // #endregion
+
   // The built-in triggers always apply, and lines saved here are added to
   // them: a list saved before a trigger was built in can't leave it out.
   const applyRules = () => {

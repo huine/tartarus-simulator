@@ -9,7 +9,7 @@
   const $ = (id) => document.getElementById(id);
   const TIERS = ['Normal', 'Magic', 'Rare', 'Legendary', 'Ultimate'];
   const BEASTS = { mammoth: 'Mammoth', lion: 'Lion', wolf: 'Wolf', rat: 'Rat' };
-  const KINDS = { board: 'Board', manual: 'Picture (pressed)', instruments: 'Instrument pick', objective: 'Objective', treasure: 'Warden’s Treasure', event: 'Event' };
+  const KINDS = { board: 'Board', manual: 'Picture (pressed)', timer: 'Picture (timer)', instruments: 'Instrument pick', objective: 'Objective', treasure: 'Warden’s Treasure', event: 'Event' };
   const COMMANDS = { capture: 'Took a picture', fix: 'Pressed Fix', recheck: 'Pressed Recheck', 'tools-ok': 'Confirmed the instruments', report: 'Reported a wrong reading', 'report-new': 'Reported something new', board: 'Opened the board', collapse: 'Folded or unfolded the overlay', lock: 'Locked or unlocked the overlay' };
   let data = null; // { name, base, entries }
 

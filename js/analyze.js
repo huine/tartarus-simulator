@@ -143,6 +143,10 @@
       // last picture (toolsPanel): only a panel showing more asks again.
       toolsSeen: 0,
       toolsPanel: 0,
+      // The player pressed These are right since the last instrument offer:
+      // the run's instruments are those until the game shows an offer again
+      // (usePick), whatever a picture reads.
+      toolsConfirmed: false,
       // Days of this run whose morning offered a door short (see scanToModel).
       shortDays: [],
       // The game shows no Replace / Consume card now (read from a screenshot):
@@ -2304,6 +2308,8 @@
       selected = model.warden;
     }
     if (start) gifts.waiting = 0;
+    // A new offer: the instruments can change, so they can be asked about again.
+    model.toolsConfirmed = false;
     model.step = 'choice';
     model.choice = { kind: 'tool', options: read.cards.map((c) => c.sim), rerolls: read.reroll ? 1 : 0 };
     applied = null;
@@ -2541,13 +2547,14 @@
   // the one the analyzer advised. Icons alone never add one, as two can look
   // alike (a tooltip can cover them, too). Without anything known of the
   // run, only icons the reader is sure of count. A screenshot from an
-  // earlier day than the board before starts afresh.
+  // earlier day than the board before doesn't start afresh: most are
+  // misreads (a 7 read as 17, a 21 as 11), and a new run comes with its
+  // instrument offer (usePick), which starts the model afresh itself.
   // sims: the instruments the reader can tell on a panel (any other reads
   // as something else).
   function runTools(read, base, m, notes, sims) {
-    const sameRun = !(m.day < base.day);
-    const known = sameRun ? (base.tools || []).filter((id) => T.TOOLS[id]) : [];
-    const offer = sameRun && base.step === 'choice' && base.choice && base.choice.kind === 'tool' ? base.choice.options.filter((id) => T.TOOLS[id]) : [];
+    const known = (base.tools || []).filter((id) => T.TOOLS[id]);
+    const offer = base.step === 'choice' && base.choice && base.choice.kind === 'tool' ? base.choice.options.filter((id) => T.TOOLS[id]) : [];
     const out = known.map((id) => ({ id, sim: id, name: T.toolName(id), conf: 1, kept: true }));
     const has = (id) => out.some((t) => t.sim === id);
     const slots = read.length;
@@ -2561,11 +2568,10 @@
     // last confirmed (m.toolsSeen).
     m.toolsToConfirm = '';
     m.toolsPanel = slots;
-    if (!sameRun) {
-      m.toolsLocked = false;
-      m.toolsSeen = 0;
-    }
-    if (sameRun && (known.length || offer.length || base.runStart || base.toolsLocked)) {
+    // Confirmed by the player: kept, and not asked again, until the next
+    // instrument offer, even for a panel that reads as holding more.
+    if (base.toolsConfirmed) return out;
+    if (known.length || offer.length || base.runStart || base.toolsLocked) {
       if (offer.length && slots > known.length && !offer.some(has)) {
         const seen = read.filter((t) => offer.includes(t.sim)).sort((a, b) => b.conf - a.conf)[0];
         // An icon read as an instrument that wasn't offered can still be one
@@ -3225,6 +3231,7 @@
       model.toolsLocked = true;
       // The panel's count now: only more than this asks again.
       model.toolsSeen = Math.max(model.tools.length, model.toolsPanel || 0);
+      model.toolsConfirmed = true;
       changed();
       ask();
     });
@@ -3398,6 +3405,8 @@
       readFrame: (bitmap) => new Promise((resolve) => readBitmap(bitmap, { quiet: true, folded: true, onRead: resolve })),
       readPick: (bitmap) => readPick(bitmap),
       usePick: (read, fresh) => usePick(read, fresh),
+      // The instrument offer on the board now, or null.
+      offerNow: () => (model.step === 'choice' && model.choice && model.choice.kind === 'tool' ? model.choice.options.slice() : null),
       readTreasure: (bitmap) => readTreasure(bitmap),
       readObjective: (bitmap) => readObjective(bitmap),
       // The game's language (from the log: auto), and a screen the reader

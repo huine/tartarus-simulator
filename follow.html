@@ -424,6 +424,12 @@
       <div class="az-auto-options">
         <label class="toggle"><input type="checkbox" id="az-auto-read"><span><strong>Read each picture into the board</strong><small>The advice refreshes after every move. Cells it's unsure of are marked Check: fix anything wrong in the analyzer and press Recheck.</small></span></label>
         <label class="toggle"><input type="checkbox" id="az-auto-speed"><span><strong>Speed-up is on in the game</strong><small>With the game’s Speed-up (top right of the prison) on, its animations are quicker, so pictures come sooner. Pressing Speed-up in the game flips this by itself.</small></span></label>
+        <label class="toggle"><input type="checkbox" id="az-auto-timer"><span><strong>Also take pictures on a timer during a run</strong><small>For the moves the game’s log doesn’t show (a consume, a Replace). The game window is looked at as often as set below, and a picture goes to the analyzer once the screen has changed and held still. It starts with the run and stops at the Riot.</small></span></label>
+        <div class="field">
+          <label class="field-label" for="az-auto-every">Look every <output id="az-auto-every-out" for="az-auto-every"></output></label>
+          <input type="range" id="az-auto-every" min="0.25" max="2" step="0.25">
+          <p class="field-note" id="az-auto-timer-state" aria-live="polite"></p>
+        </div>
       </div>
       <ol class="az-auto-caps" id="az-auto-caps" aria-live="polite"></ol>
       <details class="az-auto-dev">
@@ -608,8 +614,11 @@
       : older ? `You agreed to version ${prefs.consent} of this page. Since then, ${since.join(' And ') || 'this page changed'} Auto Screenshot Mode is off until you agree again below.` : '';
   }
   $('agree-box').addEventListener('change', (e) => ($('agree-on').disabled = !e.target.checked));
+  // The settings as saved now, not as this page loaded: the panel above
+  // saves its own (Speed-up, the timer) in the same place, and an older
+  // copy written back here undid them.
   $('agree-on').addEventListener('click', () => {
-    Object.assign(prefs, { enabled: true, consent: VERSION, consentAt: new Date().toISOString() });
+    Object.assign(prefs, load(), { enabled: true, consent: VERSION, consentAt: new Date().toISOString() });
     if (!save(prefs)) {
       $('agree-status').textContent = 'This browser won’t save settings (a private window?), so it can’t be turned on here.';
       return;
@@ -619,7 +628,7 @@
     location.reload();
   });
   $('agree-off').addEventListener('click', () => {
-    Object.assign(prefs, { enabled: false, consent: 0, consentAt: null });
+    Object.assign(prefs, load(), { enabled: false, consent: 0, consentAt: null });
     save(prefs);
     // Other tabs stop by themselves (js/capture.js); this one stops here.
     if (window.TartarusCapture) {

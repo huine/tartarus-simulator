@@ -32,6 +32,16 @@ npm start              # against the live site
 npm run local          # against http://localhost:8090/ (node tools/serve.js --port 8090)
 ```
 
+**Offline** (`npm run offline`, or `--site-dir=DIR` for another copy of the
+site): the pages come from this repository at `app://tartarus/`, a secure
+origin like localhost, with no server, and nothing reaches the internet.
+`npm run offline-fetch` (once, online) keeps the Google Fonts and Tesseract
+files the pages load in `offline/`, and the app answers those URLs from it.
+Board snapshots aren't sent, a report is kept in the user data folder
+(`offline/reports.jsonl`), and the site and app don't update themselves.
+Anything else the pages ask for fails, noted once in the debug log
+(`offline: not loaded`).
+
 VS Code's terminal sets `ELECTRON_RUN_AS_NODE=1`; unset it first if Electron
 says it can't find the module `electron`.
 

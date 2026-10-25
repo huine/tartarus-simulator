@@ -205,18 +205,27 @@
   // (S16GamePlayCheckOut, with its Riot sound) folds the overlay until the
   // fight is over; the prison's own screens unfold it again. Only these
   // facts go to the app, never the log's lines.
-  const RIOT = /S16GamePlayCheckOut Run|UI_S16_Riot_Interface/;
-  const PRISON = /S16GamePlayEntry Run|Btn_S16GamePlay_Start|S16BoardTaskPop Run|S16BoardRelicPop Run|S16BoardMain Run/;
+  // Since the game's update of 2026-10-20 the log has only the screens
+  // opening (Page@ OpenView): the Riot's is S16GamePlayCheckOut.
+  const RIOT = /S16GamePlayCheckOut Run|UI_S16_Riot_Interface|Page@ OpenView S16GamePlayCheckOut\b/;
+  const PRISON = /S16GamePlayEntry Run|Btn_S16GamePlay_Start|S16BoardTaskPop Run|S16BoardRelicPop Run|S16BoardMain Run|Page@ OpenView S16(GamePlayEntry|BoardTaskPop|BoardRelicPop|BoardMain)\b/;
   // Ignore on the Riot screen (Btn_S16GamePlay_CheckOut_AbandonChallenge)
   // ends the run; the next run's Start, objective or instrument pick begins
-  // one.
+  // one. The new log doesn't show Ignore: the prison's entry opening after
+  // the Riot's screen is the run's end, fought or ignored.
   const RUN_OVER = /Btn_S16GamePlay_CheckOut_AbandonChallenge/;
-  const RUN_NEW = /Btn_S16GamePlay_Start|S16BoardTaskPop Run|S16BoardRelicPop Run/;
+  const ENTRY = /Page@ OpenView S16GamePlayEntry\b/;
+  const RUN_NEW = /Btn_S16GamePlay_Start|S16BoardTaskPop Run|S16BoardRelicPop Run|Page@ OpenView S16Board(TaskPop|RelicPop)\b/;
+  let riotSeen = false;
   const riotWatch = (s) => {
-    if (RUN_OVER.test(s.line)) D.run('over');
-    else if (RUN_NEW.test(s.line)) D.run('new');
-    if (RIOT.test(s.line)) D.riot(true);
-    else if (PRISON.test(s.line)) D.riot(false);
+    if (RUN_OVER.test(s.line) || (riotSeen && ENTRY.test(s.line))) {
+      riotSeen = false;
+      D.run('over');
+    } else if (RUN_NEW.test(s.line)) D.run('new');
+    if (RIOT.test(s.line)) {
+      riotSeen = true;
+      D.riot(true);
+    } else if (PRISON.test(s.line)) D.riot(false);
   };
   C.on('seen', riotWatch);
 

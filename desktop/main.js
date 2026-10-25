@@ -18,13 +18,15 @@
  * website, by the website's own code.
  *
  * Options: --site=URL (a local copy: --site=http://localhost:8090/),
+ * --offline or --site-dir=DIR (no internet: see "Offline" below),
  * --game-title=REGEX and --log=PATH (tests), --user-data=DIR, --test (no
  * hotkeys, balloons or updates), --dev (developer tools). */
 'use strict';
 
-const { app, BrowserWindow, Menu, Tray, desktopCapturer, dialog, globalShortcut, ipcMain, nativeImage, net, screen, session, shell, webContents } = require('electron');
+const { app, BrowserWindow, Menu, Tray, desktopCapturer, dialog, globalShortcut, ipcMain, nativeImage, net, protocol, screen, session, shell, webContents } = require('electron');
 const fs = require('fs');
 const path = require('path');
+const { pathToFileURL } = require('url');
 const { execFile } = require('child_process');
 
 // ---------- Options ----------
@@ -37,9 +39,21 @@ const arg = (name) => {
 const flag = (name) => process.argv.includes(`--${name}`);
 
 const LIVE_SITE = 'https://blahdot3h.github.io/tartarus-simulator/';
-let SITE = arg('site') || process.env.TARTARUS_SITE || LIVE_SITE;
+// Offline: the site's pages come from a folder on this PC (this repository
+// by default, or --site-dir=DIR) at app://tartarus/, and nothing reaches the
+// internet. See "Offline" below.
+const SITE_DIR = arg('site-dir') ? path.resolve(arg('site-dir')) : flag('offline') ? path.join(__dirname, '..') : null;
+const OFFLINE = !!SITE_DIR;
+let SITE = OFFLINE ? 'app://tartarus/' : arg('site') || process.env.TARTARUS_SITE || LIVE_SITE;
 if (!SITE.endsWith('/')) SITE += '/';
 const SITE_URL = new URL(SITE);
+// URL.origin is 'null' for app://, so origins are compared as Chromium
+// writes them.
+const originOf = (u) => `${u.protocol}//${u.host}`;
+const SITE_ORIGIN = originOf(SITE_URL);
+// A secure origin like localhost, so the pages can read the log, share the
+// window and fetch their own files. Before the app is ready, as Electron asks.
+if (OFFLINE) protocol.registerSchemesAsPrivileged([{ scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } }]);
 // #region game-title
 const GAME_TITLE = new RegExp(arg('game-title') || '^Torchlight: Infinite\\s*$');
 // #endregion
@@ -155,7 +169,7 @@ process.on('uncaughtException', (e) => note('error', String(e && e.stack || e)))
 function pageOf(url) {
   try {
     const u = new URL(url);
-    if (u.origin !== SITE_URL.origin || !u.pathname.startsWith(SITE_URL.pathname)) return null;
+    if (originOf(u) !== SITE_ORIGIN || !u.pathname.startsWith(SITE_URL.pathname)) return null;
     return u.pathname.slice(SITE_URL.pathname.length) || 'index.html';
   } catch (e) {
     return null;
@@ -1137,7 +1151,7 @@ function pushShell(patch) {
     appUpdate,
     hotkeys: HOTKEYS,
     screenShare: settings.screenShare ? settings.screenShare.on : null,
-    local: /^(localhost|127\.0\.0\.1)$/.test(SITE_URL.hostname),
+    local: OFFLINE || /^(localhost|127\.0\.0\.1)$/.test(SITE_URL.hostname),
     version: app.getVersion(),
   }, shellExtra));
 }
@@ -1174,7 +1188,7 @@ ipcMain.on('consent:set', (e, value) => {
 // An agreement given on the live site before the app remembered agreements:
 // read once from that page, so the test copy doesn't ask again.
 async function adoptLiveAgreement() {
-  if (settings.consent || SITE === LIVE_SITE) return;
+  if (settings.consent || SITE === LIVE_SITE || OFFLINE) return;
   const win = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true } });
   try {
     await win.loadURL(`${LIVE_SITE}follow.html`);
@@ -1589,10 +1603,80 @@ function allowCapture() {
   const allowed = new Set(['media', 'display-capture', 'clipboard-sanitized-write', 'fullscreen']);
   const ok = (url) => !!pageOf(url || '');
   session.defaultSession.setPermissionRequestHandler((wc, permission, cb, details) => cb(allowed.has(permission) && ok(details.requestingUrl || wc.getURL())));
-  session.defaultSession.setPermissionCheckHandler((wc, permission, origin) => allowed.has(permission) && origin === SITE_URL.origin);
+  session.defaultSession.setPermissionCheckHandler((wc, permission, origin) => allowed.has(permission) && origin === SITE_ORIGIN);
 }
 
 // #endregion
+// ---------- Offline ----------
+
+// With --offline (or --site-dir), the pages are the files in SITE_DIR at
+// app://tartarus/, and every http(s) request from the app is answered here,
+// never by the internet:
+//  - the fonts and the text reader (Tesseract, from jsDelivr) come from
+//    offline/, which `npm run offline-fetch` fills once, online;
+//  - the collector: board snapshots are dropped (the page doesn't send them
+//    again), and a report is kept in the user data folder, offline/reports.jsonl;
+//  - anything else fails, noted once in the debug log.
+const CACHE_DIR = path.join(__dirname, 'offline');
+const COLLECTOR = 'tartarus-live.blahdot3h.workers.dev';
+const REPORTS = () => path.join(app.getPath('userData'), 'offline', 'reports.jsonl');
+
+function answer(status, body, type) {
+  return new Response(body, { status, headers: { 'content-type': type || 'application/json', 'access-control-allow-origin': '*', 'cache-control': 'no-store' } });
+}
+
+async function collect(req, u) {
+  if (req.method === 'OPTIONS') return answer(204, null);
+  if (u.pathname !== '/v1/reports') return answer(400, JSON.stringify({ error: 'offline' }));
+  try {
+    fs.mkdirSync(path.dirname(REPORTS()), { recursive: true });
+    fs.appendFileSync(REPORTS(), `${(await req.text()).replace(/\n/g, ' ')}\n`);
+    note('offline: report kept in', REPORTS());
+    return answer(503, JSON.stringify({ error: `The app is offline: the report was kept on this PC (${REPORTS()}).` }));
+  } catch (e) {
+    return answer(503, JSON.stringify({ error: `The app is offline, and the report couldn’t be kept: ${(e && e.message) || e}` }));
+  }
+}
+
+function serveOffline() {
+  if (!OFFLINE) return;
+  let cache = {};
+  try {
+    cache = JSON.parse(fs.readFileSync(path.join(CACHE_DIR, 'index.json'), 'utf8'));
+  } catch (e) {
+    note('offline: no offline/index.json (npm run offline-fetch, once, online): no fonts or text reader');
+  }
+  protocol.handle('app', (req) => {
+    const u = new URL(req.url);
+    const file = path.resolve(SITE_DIR, decodeURIComponent(u.pathname).replace(/^\/+/, '') || 'index.html');
+    if (!file.startsWith(SITE_DIR + path.sep)) return answer(403, '', 'text/plain');
+    const st = statOf(file);
+    if (!st || !st.isFile()) return answer(404, '', 'text/plain');
+    return net.fetch(pathToFileURL(file).href);
+  });
+  const missed = new Set();
+  const outside = async (req) => {
+    const hit = cache[req.url];
+    if (hit) {
+      try {
+        return answer(200, fs.readFileSync(path.join(CACHE_DIR, hit.file)), hit.type);
+      } catch (e) {
+        // Gone from offline/: as a miss.
+      }
+    }
+    const u = new URL(req.url);
+    if (u.hostname === COLLECTOR) return collect(req, u);
+    if (!missed.has(req.url)) {
+      missed.add(req.url);
+      note('offline: not loaded', req.method, req.url.slice(0, 300));
+    }
+    return answer(503, '', 'text/plain');
+  };
+  protocol.handle('https', outside);
+  protocol.handle('http', outside);
+  note(`offline: site ${SITE_DIR}, ${Object.keys(cache).length} files kept from the internet`);
+}
+
 // ---------- Keeping up with the site ----------
 
 // The site's pages carry an asset tag (?v=) that changes with every update.
@@ -1606,6 +1690,7 @@ async function pageTag() {
   }
 }
 async function checkSite() {
+  if (OFFLINE) return; // the pages change only with the folder: Reload the site
   try {
     const res = await net.fetch(SITE + PAGES.analyzer, { cache: 'no-store' });
     const m = /[?&]v=([\w.-]+)/.exec(await res.text());
@@ -1643,7 +1728,7 @@ function reloadSite() {
 // The app itself updates from the GitHub releases, when it's installed.
 let updater = null;
 function startUpdater() {
-  if (!app.isPackaged || TEST) return;
+  if (!app.isPackaged || TEST || OFFLINE) return;
   try {
     updater = require('electron-updater').autoUpdater;
   } catch (e) {
@@ -1796,7 +1881,8 @@ if (!app.requestSingleInstanceLock()) {
   }
 
   app.whenReady().then(async () => {
-    note(`start: version ${app.getVersion()}, site ${SITE}${DEV ? ', debug' : ''}${TEST ? ', test' : ''}, foreground check ${win32 ? 'on' : 'off'}, as administrator: ${yesNo(win32 ? win32.selfElevated() : null)}`);
+    note(`start: version ${app.getVersion()}, site ${SITE}${OFFLINE ? ` (offline, from ${SITE_DIR})` : ''}${DEV ? ', debug' : ''}${TEST ? ', test' : ''}, foreground check ${win32 ? 'on' : 'off'}, as administrator: ${yesNo(win32 ? win32.selfElevated() : null)}`);
+    serveOffline();
     allowCapture();
     pruneRecords();
     await refreshLog();

@@ -111,16 +111,37 @@
   // Auto Screenshot Mode's pictures, as they come in and as they're read.
   let reading = null; // { kind, at }
   let lastRead = null;
+  // Each picture's kind, by its id: a timed picture with no board in it (a
+  // popup, the Riot) is dropped quietly, not shown as a failed read. Nor is
+  // a picture's failed read once a newer picture came (a board's picture
+  // that caught the Warden's Treasure opening, read after the Treasure).
+  const kinds = new Map();
+  let latest = 0;
   if (typeof BroadcastChannel === 'function') {
     const channel = new BroadcastChannel('tartarus-follow');
     channel.addEventListener('message', (e) => {
       const m = e.data || {};
       if (m.type === 'frame') {
         reading = { kind: m.kind, at: Date.now() };
+        kinds.set(m.id, m.kind);
+        latest = Math.max(latest, m.id);
+        if (kinds.size > 50) kinds.delete(kinds.keys().next().value);
         recordPicture(m);
       } else if (m.type === 'read' && m.read) {
-        reading = null;
+        // An older picture's answer doesn't end a newer one's reading.
+        if (m.id >= latest) reading = null;
         const r = m.read;
+        if (kinds.get(m.id) === 'timer' && (!r.ok || r.skipped)) {
+          const w = waitingPictures.get(m.id);
+          if (w) clearTimeout(w.timer);
+          waitingPictures.delete(m.id);
+          return;
+        }
+        if (!r.ok && m.id < latest) {
+          record({ type: 'read', id: m.id, ok: false, reason: r.reason || '', summary: summaryNow() });
+          setTimeout(() => savePicture(m.id), 1500);
+          return;
+        }
         lastRead = { at: Date.now(), ok: !!r.ok, reason: r.reason || '', day: r.day, unsure: r.unsure || 0, pick: !!r.pick, names: r.names || [], objective: !!r.objective, name: r.name || '', treasure: !!r.treasure };
         if (!r.ok) record({ type: 'read', id: m.id, ok: false, reason: r.reason || '', summary: summaryNow() });
         setTimeout(() => savePicture(m.id), 1500); // after the advice's check has started

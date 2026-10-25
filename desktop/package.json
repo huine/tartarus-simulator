@@ -10,6 +10,8 @@
   "scripts": {
     "start": "electron .",
     "local": "electron . --site=http://localhost:8090/",
+    "offline": "electron . --offline",
+    "offline-fetch": "node offline-fetch.js",
     "dist": "electron-builder --win --publish never",
     "release": "electron-builder --win --publish always"
   },

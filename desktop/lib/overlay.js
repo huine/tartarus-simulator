@@ -107,7 +107,7 @@
     const problem = followProblem();
     if (problem) out.push(problem);
 
-    if (a && a.reading) out.push(line('busy', `Reading the ${a.reading.kind === 'board' || a.reading.kind === 'manual' ? 'picture' : a.reading.kind}…`));
+    if (a && a.reading) out.push(line('busy', `Reading the ${['board', 'manual', 'timer'].includes(a.reading.kind) ? 'picture' : a.reading.kind}…`));
     const failed = a && a.lastRead && !a.lastRead.ok && !a.reading && Date.now() - a.lastRead.at < 120000;
     if (failed) out.push(line('bad', `Couldn’t read the last picture: ${a.lastRead.reason || 'no board in it'}.`, button('Try again', 'capture')));
     else if (f && f.lastFrame && !f.lastFrame.ok && Date.now() - f.lastFrame.at < 60000) out.push(line('warn', `No picture taken: ${f.lastFrame.why || 'the game window isn’t shared'}`));

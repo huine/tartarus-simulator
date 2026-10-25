@@ -41,7 +41,9 @@
   async function onPicture(m) {
     const answer = (patch) => channel.postMessage(Object.assign({ type: 'read', to: m.from, id: m.id }, patch));
     const before = lastKind;
-    lastKind = m.kind;
+    // A timed picture comes between any two: it doesn't make a re-roll's
+    // offer look like a new one.
+    if (m.kind !== 'timer') lastKind = m.kind;
     // The Treasure's picks still waiting (Opulence gives 3 a Treasure),
     // from the log's counts. A board between two picks is the board behind
     // the next one, like one seen with View Prison Status (and a board just
@@ -52,7 +54,9 @@
     if (m.kind === 'treasure' || (counts && counts !== giftsSeen)) giftsAt = Date.now();
     if (counts) giftsSeen = counts;
     const waiting = m.gifts && A.giftCounts ? A.giftCounts(m.gifts) : null;
-    if (m.kind === 'board' && waiting > 0 && !m.treasureView) {
+    // A timed picture (follow.html) is read as the board, like the log's.
+    const board = m.kind === 'board' || m.kind === 'timer';
+    if (board && waiting > 0 && !m.treasureView) {
       if (Date.now() - giftsAt < 30000) m.treasureView = true;
       else if (A.giftsDone) A.giftsDone();
     }
@@ -83,6 +87,7 @@
   // A picture to read: a board, the instrument pick, the objective, or a
   // picture the log didn't name.
   async function readPicture(m, answer, mine, before) {
+    const board = m.kind === 'board' || m.kind === 'timer';
     let bitmap;
     try {
       const p = m.pixels;
@@ -101,6 +106,26 @@
       return;
     }
     let offerMissed = '';
+    // A timed picture while an instrument offer is on screen: the game's new
+    // log doesn't show a re-roll, so a different offer there is the re-roll's
+    // (the same one again, or the board after the pick, goes on as below).
+    if (m.kind === 'timer' && before === 'instruments' && A.offerNow) {
+      const read = await A.readPick(bitmap);
+      const sure = read.ok ? read.cards.map((c) => c.conf).sort((a, b) => b - a)[1] : 0;
+      const now = A.offerNow();
+      if (sure >= 0.5 && now && read.cards.map((c) => c.sim).sort().join() !== now.slice().sort().join()) {
+        answer({ read });
+        if (mine !== newest) return;
+        const asked = A.usePick(read, pickFresh);
+        answer({ state: 'used', asked });
+        return;
+      }
+      if (sure >= 0.5) {
+        // The same offer: nothing new to read.
+        answer({ read: Object.assign({}, read, { skipped: true }) });
+        return;
+      }
+    }
     if (m.kind === 'instruments') {
       // The offer that starts a run comes with the day-0 line (m.fresh); an
       // objective's reward offers one mid-run, on the board as it is. A
@@ -125,7 +150,7 @@
     // instrument offer: at least two of its cards read surely, which no
     // board does. It starts a run unless a board came in the last few
     // minutes (an objective's reward comes mid-run).
-    if (m.kind !== 'board') {
+    if (!board) {
       const pick = await A.readPick(bitmap);
       const sure = pick.ok ? pick.cards.map((c) => c.conf).sort((a, b) => b - a)[1] : 0;
       if (sure >= 0.5) {
@@ -143,7 +168,8 @@
     if (!read.ok && offerMissed && A.langMissed) A.langMissed('instrument offer', bitmap, offerMissed);
     // A picture with no board in it: maybe the Warden's Treasure, read by
     // its printed text. A board's picture can catch it too (report 55).
-    if (!read.ok && !read.skipped && A.readTreasure) {
+    // Not for a timed picture: the log's own trigger has the Treasure.
+    if (!read.ok && !read.skipped && A.readTreasure && m.kind !== 'timer') {
       const tr = await A.readTreasure(bitmap);
       if (tr.ok && mine === newest) {
         answer({ read: { ok: true, treasure: true } });
@@ -178,7 +204,29 @@
       if (A.useTreasure('view')) answer({ asked: true });
       return;
     }
-    if (A.ask()) answer({ asked: true });
+    if (A.ask()) {
+      answer({ asked: true });
+      tellMove(answer, mine);
+    }
+  }
+
+  // The move advised on a board, once the check gives it (and if it
+  // changes): after a Replace the board changes too little for the timer
+  // to see it on its own (follow.html).
+  function tellMove(answer, mine) {
+    let told = '';
+    const until = Date.now() + 15000;
+    const poll = () => {
+      if (mine !== newest || Date.now() > until) return;
+      const rec = A.recommendation ? A.recommendation() : null;
+      const move = rec && rec.label ? rec.label : '';
+      if (move && move !== told) {
+        told = move;
+        answer({ move });
+      }
+      setTimeout(poll, 300);
+    };
+    poll();
   }
 
   // Whether Auto Screenshot Mode is running, from what follow.html says of itself

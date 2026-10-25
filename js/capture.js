@@ -14,7 +14,10 @@
  *   connectLog() / resumeLog(click) / stopLog()
  *   connectWindow() / useStream(stream) / stopWindow()
  *   setRules([{ kind, pattern, settle, rank }]) / setWatch(pattern)
- *   captureNow(kind) / useHandle(handle) (tests: any object with getFile()) */
+ *   captureNow(kind) / grab() (a frame for the page itself, or null)
+ *   sendFrame(kind, frame) (a grabbed frame, out as a picture)
+ *   waiting() (whether a trigger's picture is waiting for the screen to settle)
+ *   useHandle(handle) (tests: any object with getFile()) */
 (function () {
   'use strict';
 
@@ -69,8 +72,9 @@
     const MAX_LINE = 8192; // characters of one line that are checked
     const MAX_HITS = 200; // lines reported per look: the newest
     // The game's own lines, which every trigger is: with the game's Enable
-    // Log off, it writes almost none (a player's log: 42 in all).
-    const DETAIL = /\b(TLLua|TLGame):/;
+    // Log off, it writes almost none (a player's log: 42 in all). Since the
+    // game's update of 2026-10-20 they're "TLShipping: Display: [Game] ...".
+    const DETAIL = /\b(TLLua|TLGame):|\bTLShipping: \w+: \[Game\]/;
     // The game's language, which it writes every few minutes ("sdkLang=en_US"):
     // only its two letters are kept, and the line is dropped like any other.
     const LANG = /\bsdkLang=([A-Za-z]{2})[_-]/;
@@ -283,8 +287,10 @@
       return;
     }
     // A "speed" line (the game's Speed-up button) takes no picture: the page
-    // hears it as a hit, and sets the pace.
-    if (rule.kind === 'speed') return;
+    // hears it as a hit, and sets the pace. Nor do a run's start and end
+    // ("run-start", "run-end"), which start and stop the page's timed
+    // pictures.
+    if (rule.kind === 'speed' || rule.kind === 'run-start' || rule.kind === 'run-end') return;
     // The board after the Warden's Treasure's popup closes (View Prison
     // Status pressed quickly, or a gift taken) gets its own picture: the
     // Treasure still waiting goes at once, as it needs none (d8: a press
@@ -644,6 +650,14 @@
 
   // #endregion
 
+  // A frame the page grabbed itself (grab) and keeps, as a picture of this
+  // kind: it goes out like the triggers' (follow.html's timed pictures).
+  // extra: more for the page's own listener, like the frame's signature.
+  function sendFrame(kind, frame, extra) {
+    setState({ frames: state.frames + 1 });
+    emit('frame', Object.assign({ kind, hits: [], frame, blank: isBlank(frame), why: '', time: new Date() }, extra));
+  }
+
   async function captureNow(kind) {
     const frame = await grab();
     if (frame) setState({ frames: state.frames + 1 });
@@ -715,5 +729,7 @@
     setPace,
     captureNow,
     grab,
+    sendFrame,
+    waiting: () => !!burst,
   };
 })();
