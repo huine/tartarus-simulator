@@ -1075,6 +1075,11 @@
           // Cells run 02-16: more than two marks after "Cell" isn't a number
           // this card can have (a letter split in two, or a speck).
           if (!num.length || num.length > 2) continue;
+          // Nor is a piece whose text goes on just after it: "Go to
+          // Interrogation" cut short, its last letter read as a 6 (the
+          // user's day 3: doors 13, 14, 06). The next card's text is about
+          // 10 letter heights away.
+          if (line.pieces.some((q) => q !== p && q.x0 > p.x1 && q.x0 - p.x1 < 3.5 * cap && q.glyphs.filter((g) => g.h >= 0.6 * cap).length >= 2)) continue;
           const like = gray && ref && ref.prefix ? prefixLike(gray, img.width, img.height, p, ref.prefix) : 1;
           // A card partly hidden (the pointer over "Go") still has the words of
           // "Go to Cell N": 2, 2 and 4 letters, then the number.

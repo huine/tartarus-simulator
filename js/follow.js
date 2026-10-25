@@ -810,13 +810,18 @@
   // this on, the game window is looked at every 0.25 to 2 seconds during a
   // run, and a picture goes to the analyzer when the screen is unlike any
   // in the last minute's pictures (timed or from the log) and held still for one
-  // look, so an animation isn't read halfway, and none while a trigger's
+  // look, so an animation isn't read halfway, or has been new for STILL_MS
+  // without holding still (the user's day 20: flames over many prisoners,
+  // and a consume's, kept every look apart, and the Consume card and the
+  // chain came 22 and 17 s late), and none while a trigger's
   // picture waits for the screen to settle. A run starts with the log's
   // prison screens (the board, a day's banner, the objective or the
   // instruments) and ends at the Riot's screen, the prison's entry or
   // leaving the map (the "run-start" and "run-end" triggers).
   let inRun = false;
   let pending = null; // a changed screen, waiting to hold still
+  let pendingSince = 0; // when the screen first looked new
+  const STILL_MS = 1500;
   let looking = false;
   let lookTimer = 0;
   let timedCount = 0;
@@ -843,7 +848,8 @@
       if (!frame) return;
       const sig = signature(frame);
       const known = !sig || (!movedFrom(sig) && seenRecently(sig));
-      if (known || !sameScreen(sig, pending)) {
+      if (!known && !pending) pendingSince = Date.now();
+      if (known || (!sameScreen(sig, pending) && Date.now() - pendingSince < STILL_MS)) {
         // Unchanged (or a screen of the last minute), or still changing:
         // nothing to read yet.
         pending = known ? null : sig;
