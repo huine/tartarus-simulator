@@ -110,7 +110,7 @@
     // log doesn't show a re-roll, so a different offer there is the re-roll's
     // (the same one again, or the board after the pick, goes on as below).
     if (m.kind === 'timer' && before === 'instruments' && A.offerNow) {
-      const read = await A.readPick(bitmap);
+      const read = await A.readPick(bitmap, m.takenAt);
       const sure = read.ok ? read.cards.map((c) => c.conf).sort((a, b) => b - a)[1] : 0;
       const now = A.offerNow();
       if (sure >= 0.5 && now && read.cards.map((c) => c.sim).sort().join() !== now.slice().sort().join()) {
@@ -132,7 +132,7 @@
       // re-roll is the same offer again.
       pickFresh = !!m.fresh || (before === 'instruments' && pickFresh);
       const fresh = pickFresh;
-      const read = await A.readPick(bitmap);
+      const read = await A.readPick(bitmap, m.takenAt);
       if (read.ok) {
         answer({ read });
         if (read.unsure && A.langMissed) A.langMissed('instrument offer', bitmap, `${read.unsure} of the cards not read`);
@@ -152,7 +152,7 @@
     // minutes (an objective's reward comes mid-run). Not an offer's own
     // picture again: it was just read as one (each read takes a while).
     if (!board && m.kind !== 'instruments') {
-      const pick = await A.readPick(bitmap);
+      const pick = await A.readPick(bitmap, m.takenAt);
       const sure = pick.ok ? pick.cards.map((c) => c.conf).sort((a, b) => b - a)[1] : 0;
       if (sure >= 0.5) {
         answer({ read: pick });
@@ -164,7 +164,7 @@
         return;
       }
     }
-    const read = await A.readFrame(bitmap);
+    const read = await A.readFrame(bitmap, m.takenAt, m.motion ? Object.assign({ watched: m.watched || 0 }, m.motion) : null);
     // Neither an offer nor a board: an offer in another language, maybe.
     if (!read.ok && offerMissed && A.langMissed) A.langMissed('instrument offer', bitmap, offerMissed);
     // A picture with no board in it: maybe the Warden's Treasure, read by
