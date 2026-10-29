@@ -2660,16 +2660,23 @@
   // it looks like a run's start, not a misread day (the user's run: one
   // picture of day 15 read as day 19, so the next, day 15 again, cleared the
   // run's confirmed instruments and asked for them again). Early in a run
-  // (day 1 or 2), or far fewer inmates out than before: a run starts with
-  // about 4.
+  // (day 1 or 2) with a run's few inmates out, about 4, or far fewer out
+  // than before. Not a panel holding as many instruments as the run has,
+  // more than one: a new run starts with one. The user's run of 29 October:
+  // late in a 30-day run with 4 inmates out, days read as 2, 4 and 14
+  // cleared the confirmed instruments each time, and one read as day 2 had
+  // 13 inmates out.
   function newRun(m, base) {
     if (!(m.day < base.day)) return false;
-    if (m.day <= 2) return true;
+    const held = (base.tools || []).length;
+    if (held > 1 && (m.toolsPanel || 0) >= held) return false;
     const out = (x) => (x.cells || []).filter((c) => c && c.kind === 'inmate').length;
-    return out(m) <= Math.max(5, out(base) - 4);
+    if (m.day <= 2) return out(m) <= 6;
+    return out(m) <= out(base) - 4;
   }
 
   function runTools(read, base, m, notes, sims) {
+    m.toolsPanel = read.length;
     const sameRun = !newRun(m, base);
     const known = sameRun ? (base.tools || []).filter((id) => T.TOOLS[id]) : [];
     const offer = sameRun && base.step === 'choice' && base.choice && base.choice.kind === 'tool' ? base.choice.options.filter((id) => T.TOOLS[id]) : [];
@@ -2685,7 +2692,6 @@
     // question is a panel showing more than the run has and than the count
     // last confirmed (m.toolsSeen).
     m.toolsToConfirm = '';
-    m.toolsPanel = slots;
     if (!sameRun) {
       m.toolsLocked = false;
       m.toolsSeen = 0;
